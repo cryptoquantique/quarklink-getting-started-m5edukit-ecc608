@@ -171,7 +171,6 @@ void getMqttTopic(quarklink_context_t *quarklink, char *topic) {
  * \return int 0 for success
  */
 int mqtt_init(quarklink_context_t *quarklink, esp_mqtt_client_handle_t *client) {
-    
     if (is_running) {
         return 0;
     }
