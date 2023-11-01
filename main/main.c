@@ -172,30 +172,6 @@ int mqtt_init(quarklink_context_t *quarklink, esp_mqtt_client_handle_t* client) 
         sprintf(mqtt_topic, "devices/%s/messages/events/", quarklink->deviceID);
     }
 
-    if (isAzure(quarklink) || isAzureCentral(quarklink)) {
-        char userName[256] = "";
-        sprintf(userName, "%s/%s/?api-version=2018-06-30", quarklink->iotHubEndpoint, quarklink->deviceID);
-        mqtt_cfg.credentials.username = userName;
-        mqtt_cfg.session.last_will.topic = "";
-        mqtt_cfg.session.last_will.msg = "";
-        mqtt_cfg.session.last_will.qos = 0;
-        mqtt_cfg.session.last_will.retain = false;
-        mqtt_cfg.session.keepalive = 10;
-        sprintf(mqtt_topic, "devices/%s/messages/events/", quarklink->deviceID);
-    }
-
-    if (isAzure(quarklink) || isAzureCentral(quarklink)) {
-        char userName[256] = "";
-        sprintf(userName, "%s/%s/?api-version=2018-06-30", quarklink->iotHubEndpoint, quarklink->deviceID);
-        mqtt_cfg.credentials.username = userName;
-        mqtt_cfg.session.last_will.topic = "";
-        mqtt_cfg.session.last_will.msg = "";
-        mqtt_cfg.session.last_will.qos = 0;
-        mqtt_cfg.session.last_will.retain = false;
-        mqtt_cfg.session.keepalive = 10;
-        sprintf(mqtt_topic, "devices/%s/messages/events/", quarklink->deviceID);
-    }
-
     *client = esp_mqtt_client_init(&mqtt_cfg);
     if (*client == NULL) {
         return -1;
