@@ -11,7 +11,7 @@ The result is an M5Stack (ESP32-Eco3) that is secured by using:
 
 and which can only be updated Over-The-Air with firmware signed by a key from the QuarkLink Hardware Security Module (HSM).
 
-See the [QuarkLink Getting Started Guide](https://cryptoquantique.github.io/QuarkLink_Ignite_Getting_Started_Guide.pdf) for more detailed information.
+See the [QuarkLink Getting Started Guide](https://github.com/cryptoquantique/cryptoquantique.github.io/blob/main/QuarkLink%20Ignite%20Getting%20Started%20Guide%20V1.00.pdf) for more detailed information.
 
 ## Requirements
 
