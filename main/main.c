@@ -159,7 +159,7 @@ int mqtt_init(quarklink_context_t *quarklink, esp_mqtt_client_handle_t* client) 
             }
         }
     };
-        
+
     if (isAzure(quarklink) || isAzureCentral(quarklink)) {
         char userName[256] = "";
         sprintf(userName, "%s/%s/?api-version=2018-06-30", quarklink->iotHubEndpoint, quarklink->deviceID);
