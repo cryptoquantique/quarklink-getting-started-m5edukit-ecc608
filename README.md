@@ -107,5 +107,19 @@ if (((esp_tls_pki_t *) pki)->publiccert_pem_buf != NULL) {
     ret = mbedtls_x509_crt_parse(&tls->clientcert, (const unsigned char*) (((esp_tls_pki_t *) pki)->publiccert_pem_buf), ((esp_tls_pki_t *) pki)->publiccert_pem_bytes); 
 ```
 
+## ML-KEM-768(X25519Kyber768Draft00) support
+Hybrid Post quantum Cryptography features are now supported with this getting started project.  
+To enable this feature TLS1.3 must be enabled so that ML-KEM will be used in the TLS handshake process.  
+ESP-IDF 5.3.1 must be used which has the TLS1.3 support.  
+Below patch file is available and it can be applied if the correct version of ESP-IDF is being used.  
+`mlkem_mbedtls.patch` : This patch is used for enabling new ML-KEM related functionality in the hanshake process.  
+Please use below command to apply the patch:
+```sh
+patch -p1 -i <PATH/TO/PROJECT>/mlkem_mbedtls.patch -d <IDF_PATH>/components/mbedtls/mbedtls
+```
+
+Once the build is done along with the patches the binaries can be used for hybrid PQC enabled communication.  
+
 ## Further Notes
-**Custom Partition Table:** users might be interested in using their own partition table with QuarkLink. Currently, support for this feature is only for paid tiers, however users are welcome to request a custom partition table via the GitHub issues on this project.
+**Custom Partition Table:** users might be interested in using their own partition table with QuarkLink. Currently, support for this feature is only for paid tiers, however users are welcome to request a custom partition table via the GitHub issues on this project.  
+**Firmware size reduction:** Users may wanted to reduce the firmware footprint for this getting started program. This can be achieved by enabling `CONFIG_COMPILER_OPTIMIZATION_SIZE=y` in the sdkconfig file. Moreover further memory optimization techniques can be found in [the guide](https://docs.espressif.com/projects/esp-idf/en/v5.4/esp32/api-guides/performance/size.html)
