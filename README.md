@@ -19,8 +19,8 @@ There are a few requirements needed in order to get started with this project:
 
 - **M5Stack EduKit**
     This project is only meant for this specific device.
-- **esp-idf v5.1**
-    This project is meant for the esp-idf framework and it needs at least v5.1 due to some updates that are necessary to properly use the secure element.  
+- **esp-idf v5.3**
+    This project is meant for the esp-idf framework and it needs at least v5.3 due to some updates that are necessary to properly use the secure element and the TLS1.3 stack.  
     Instructions on how to setup the esp-idf environment can be found [here](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.html).
 - **quarklink-client libraries**
     The quarklink-client library comes in the form of compiled binaries and can be found in the [quarklink-binaries repository](https://github.com/cryptoquantique/quarklink-binaries/tree/main/quarklink-client).  
@@ -34,8 +34,11 @@ The esp-cryptoauthlib component included in this project, is a port of Microchip
 Instructions on how to provision the ATECC-608 are included in the `esp_cryptoauth_utility` [README.md](./components/esp-cryptoauthlib/esp_cryptoauth_utility/README.md).  
 
 ### Project configuration
->**Note:** It is assumed that the user has already familiarised with the difference between *virtual-efuses* and *release* during the QuarkLink provisioning process.  
-More information on what virtual efuses are can be found as part of [espressif programming guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/efuse.html#virtual-efuses).
+>**Note**  
+It is assumed that the user has already familiarised with the benefits of using the *Digital Signature peripheral* and the difference between *virtual-efuse* and *release* during the QuarkLink provisioning process.  
+More information can be found as part of the espressif programming guide:  
+\- [Digital Signature](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c3/api-reference/peripherals/ds.html)  
+\- [Virtual eFuses](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/efuse.html#virtual-efuses)
 
 Use ESP-IDF's `idf.py` command to configure the project:
 - Run `idf.py set-target esp32` to select the target device (note: M5Stack edukit mounts an esp32 rev3)  
@@ -46,16 +49,19 @@ Use ESP-IDF's `idf.py` command to configure the project:
     1. Copy the content of the relevant sdkconfig file (i.e. [*sdkconfig-release*](./sdkconfig-release)) and paste it into the newly generated *sdkconfig* to replace its content.
     2. Update [*sdkconfig.defaults*](./sdkconfig.defaults) by commenting out the vefuse section and un-commenting the release section, delete the generated *sdkconfig* to allow the generation of a new, updated one.
 
+>**⚠️ Important**  
+Updating a device from **vefuse** to **release** or vice-versa, will break the device. When performing an OTA update, make sure to select a firmware that is of the same type as the one provisioned.
+
 ### Select quarklink-client library
 To change the quarklink-client compiled library to use, simply modify the [CMakeLists.txt](./main/CMakeLists.txt) in the main folder and update with the path and name of the file needed.
 E.g.
 ```c
-add_prebuilt_library(quarklink_client "../lib/libquarklink-client-esp32-m5edukit-ecc608-v1.4.0.a"
+add_prebuilt_library(quarklink_client "../lib/libquarklink-client-esp32-m5edukit-ecc608-v1.4.6.a"
                     PRIV_REQUIRES nvs_flash esp_http_client esp_https_ota app_update mbedtls esp-cryptoauthlib)
 ```
 Becomes
 ```c
-add_prebuilt_library(quarklink_client "../lib/libquarklink-client-esp32-m5edukit-ecc608-v1.4.0-debug.a"
+add_prebuilt_library(quarklink_client "../lib/libquarklink-client-esp32-m5edukit-ecc608-v1.4.6-debug.a"
                     PRIV_REQUIRES nvs_flash esp_http_client esp_https_ota app_update mbedtls esp-cryptoauthlib)
 ```
 
@@ -81,44 +87,20 @@ You might notice that at the end the utility prompts you to sign the firmware an
 
 In order to update your device, you need to upload the generated binary `build/quarklink-getting-started-m5edukit-ecc608.bin` to your QuarkLink instance, where it will be signed and provided to the running device as an over-the-air update.
 
-## Troubleshooting
-At the time of writing, the latest esp-idf version is 5.1. There is a minor bug within the *esp_tls_mbedtls* component that prevents the Secure Element from working as intended.  
-Until the fix has been merged in, there is need to manually update the code by applying the provided patch (*esp-tls.patch*).
+## ML-KEM-768 support
+This project now supports hybrid Post-Quantum Cryptography using ML-KEM-768. Because hybrid key exchange is only supported in TLS1.3 and above, TLS1.3 has been enabled as part of the sdkconfig.defaults. Furthermore, ESP-IDF 5.3.1 or above must be used.
+In the root folder there is a patch file that applies the necessary changes to the mbedtls component: adds all the ML-KEM-768 related files and enables its use in the handshake process. 
 
-To apply the patch run the following command from terminal:
-```sh
-patch -p1 -i <PATH/TO/PROJECT>/esp-tls.patch -d <IDF_PATH>
-```
-
-**On Windows**: the above command needs a recent version of `patch` (2.7.6) that comes as part of Git. If not in PATH, run the above from the Git installation folder, generally:
-```sh
-"C:\Program Files\Git\usr\bin\patch.exe" -p1 -i <PATH/TO/PROJECT>/esp-tls.patch -d <IDF_PATH>
-```
-
-In particular, what changes are the two following lines of code, in the file *${IDF_PATH}\components\esp-tls\esp_tls_mbedtls.c*:
-```c
-// Lines 976, 977
-if(cfg->clientcert_buf != NULL) {
-    ret = mbedtls_x509_crt_parse(&tls->clientcert, (const unsigned char*)((esp_tls_pki_t *)pki->publiccert_pem_buf), (esp_tls_pki_t *)pki->publiccert_pem_bytes);
-```
-Is replaced with:
-```c
-if (((esp_tls_pki_t *) pki)->publiccert_pem_buf != NULL) {
-    ret = mbedtls_x509_crt_parse(&tls->clientcert, (const unsigned char*) (((esp_tls_pki_t *) pki)->publiccert_pem_buf), ((esp_tls_pki_t *) pki)->publiccert_pem_bytes); 
-```
-
-## ML-KEM-768(X25519Kyber768Draft00) support
-Hybrid Post quantum Cryptography features are now supported with this getting started project.  
-To enable this feature TLS1.3 must be enabled so that ML-KEM will be used in the TLS handshake process.  
-ESP-IDF 5.3.1 must be used which has the TLS1.3 support.  
-Below patch file is available and it can be applied if the correct version of ESP-IDF is being used.  
-`mlkem_mbedtls.patch` : This patch is used for enabling new ML-KEM related functionality in the hanshake process.  
-Please use below command to apply the patch:
+The patch only needs to be applied once to the mbedtls component installed in your <IDF_PATH>. To apply the patch run the following command from terminal:
 ```sh
 patch -p1 -i <PATH/TO/PROJECT>/mlkem_mbedtls.patch -d <IDF_PATH>/components/mbedtls/mbedtls
 ```
+**On Windows**: the above command needs a recent version of `patch` (2.7.6) that comes as part of Git. If not in PATH, run the above from the Git installation folder, generally:
+```sh
+"C:\Program Files\Git\usr\bin\patch.exe" -p1 -i <PATH/TO/PROJECT>/mlkem_mbedtls.patch -d <IDF_PATH>/components/mbedtls/mbedtls
+```
 
-Once the build is done along with the patches the binaries can be used for hybrid PQC enabled communication.  
+Once the patch has been applied build the application as explained above, the compiled binary can be used for hybrid PQC enabled communication.  
 
 ## Further Notes
 **Custom Partition Table:** users might be interested in using their own partition table with QuarkLink. Currently, support for this feature is only for paid tiers, however users are welcome to request a custom partition table via the GitHub issues on this project.  
