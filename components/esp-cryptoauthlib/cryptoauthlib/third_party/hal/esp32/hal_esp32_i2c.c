@@ -16,8 +16,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <driver/i2c.h>
+#include <soc/soc_caps.h>
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_idf_version.h"
+
 #include "cryptoauthlib.h"
 
 #define I2C_SDA_PIN                        CONFIG_ATCA_I2C_SDA_PIN
@@ -32,7 +35,23 @@
 #define LOG_LOCAL_LEVEL                    ESP_LOG_INFO
 #endif
 
-#define MAX_I2C_BUSES 2  //ESP32 has 2 I2C bus
+#define MAX_I2C_BUSES SOC_I2C_NUM  //ESP32 has 2 I2C bus
+
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 3, 0)
+
+#if SOC_HP_I2C_NUM >= 2
+#define I2C_PORT_2 I2C_NUM_1
+#elif SOC_LP_I2C_NUM >= 1
+#define I2C_PORT_2 LP_I2C_NUM_0
+#endif // SOC_HP_I2C_NUM >= 2
+
+#else // ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 3, 0)
+
+#if SOC_I2C_NUM >= 2
+#define I2C_PORT_2 I2C_NUM_1
+#endif // SOC_I2C_NUM >= 2
+
+#endif // !ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 3, 0)
 
 typedef struct atcaI2Cmaster
 {
@@ -109,7 +128,9 @@ ATCA_STATUS hal_i2c_init(ATCAIface iface, ATCAIfaceCfg *cfg)
                 i2c_hal_data[bus].id = I2C_NUM_0;
                 break;
             case 1:
-                i2c_hal_data[bus].id = I2C_NUM_1;
+#if SOC_I2C_NUM >= 2
+                i2c_hal_data[bus].id = I2C_PORT_2;
+#endif
                 break;
             default:
                 break;
