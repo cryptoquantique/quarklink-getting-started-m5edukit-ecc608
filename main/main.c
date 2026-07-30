@@ -2,10 +2,9 @@
 #include "esp_wifi.h"
 #include "freertos/event_groups.h"
 #include "esp_log.h"
-
-#include "quarklink.h"
-
 #include "mqtt_client.h"
+
+#include "quarklink/quarklink.h"
 
 
 /* FreeRTOS event group to signal when we are connected */
@@ -22,7 +21,8 @@ static int s_retry_num = 0;
 static int count = 0;
 
 static const char *TAG = "quarklink-getting-started";
-quarklink_context_t quarklink;
+static quarklink_context_t quarklink;
+static quarklink_internal_state_t quarklink_state;
 
 /* Intervals */
 // How often to check for status, in s
@@ -31,7 +31,7 @@ static const int STATUS_CHECK_INTERVAL = 20;
 static const int MQTT_PUBLISH_INTERVAL = 5;
 
 /* MQTT config */
-#define MAX_TOPIC_LENGTH    (QUARKLINK_MAX_DEVICE_ID_LENGTH + 30)
+#define MAX_TOPIC_LENGTH    (QUARKLINK_DEVICE_ID_LENGTH + 30)
 #define MAX_MESSAGE_LENGTH  30
 char mqtt_topic[MAX_TOPIC_LENGTH] = "";
 
@@ -55,8 +55,6 @@ static void event_handler(void* arg, esp_event_base_t event_base, int32_t event_
         }
     }
     else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        // ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-        // ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
@@ -124,52 +122,54 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     }
 }
 
-bool isAzure(quarklink_context_t *quarklink) {
-    return ((strstr(quarklink->iotHubEndpoint, "azure") != 0)  && (strlen(quarklink->scopeID) == 0));
+bool isAzure(quarklink_context_t *ctx) {
+    return ((strstr(ctx->iot_hub_endpoint, "azure") != NULL) &&
+            (ctx->scope_id == NULL || strlen(ctx->scope_id) == 0));
 }
 
-bool isAzureCentral(quarklink_context_t *quarklink) {
-    return ((strstr(quarklink->iotHubEndpoint, "azure") != 0)  && (strlen(quarklink->scopeID) != 0));
+bool isAzureCentral(quarklink_context_t *ctx) {
+    return ((strstr(ctx->iot_hub_endpoint, "azure") != NULL) &&
+            (ctx->scope_id != NULL && strlen(ctx->scope_id) != 0));
 }
 
 /**
- * \brief Initialise the MQTT task using to the QuarkLink details provided. 
+ * \brief Initialise the MQTT task using to the QuarkLink details provided.
  *
- * \param[in]  quarklink The quarklink context
- * \param[out] client    The handle of the mqtt client created
+ * \param[in]  ctx    The quarklink context
+ * \param[out] client The handle of the mqtt client created
  * \return int 0 for success
  */
-int mqtt_init(quarklink_context_t *quarklink, esp_mqtt_client_handle_t* client) {
+int mqtt_init(quarklink_context_t *ctx, esp_mqtt_client_handle_t* client) {
     if (is_running) {
         return 0;
     }
 
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker = {
-            .address.hostname = quarklink->iotHubEndpoint,
-            .address.port = quarklink->iotHubPort,
+            .address.hostname = ctx->iot_hub_endpoint,
+            .address.port = ctx->iot_hub_port,
             .address.transport = MQTT_TRANSPORT_OVER_SSL,
-            .verification.certificate = quarklink->iotHubRootCert
+            .verification.certificate = ctx->iot_hub_root_cert
         },
         .credentials = {
-            .client_id = quarklink->deviceID,
+            .client_id = ctx->device_id,
             .authentication = {
                 .use_secure_element = true,
-                .certificate= quarklink->deviceCert
+                .certificate = ctx->device_cert,
             }
         }
     };
 
-    if (isAzure(quarklink) || isAzureCentral(quarklink)) {
-        char userName[256] = "";
-        sprintf(userName, "%s/%s/?api-version=2018-06-30", quarklink->iotHubEndpoint, quarklink->deviceID);
+    if (isAzure(ctx) || isAzureCentral(ctx)) {
+        static char userName[256] = "";
+        sprintf(userName, "%s/%s/?api-version=2018-06-30", ctx->iot_hub_endpoint, ctx->device_id);
         mqtt_cfg.credentials.username = userName;
         mqtt_cfg.session.last_will.topic = "";
         mqtt_cfg.session.last_will.msg = "";
         mqtt_cfg.session.last_will.qos = 0;
         mqtt_cfg.session.last_will.retain = false;
         mqtt_cfg.session.keepalive = 10;
-        sprintf(mqtt_topic, "devices/%s/messages/events/", quarklink->deviceID);
+        sprintf(mqtt_topic, "devices/%s/messages/events/", ctx->device_id);
     }
 
     *client = esp_mqtt_client_init(&mqtt_cfg);
@@ -235,7 +235,7 @@ void wifi_init_sta(void) {
     else if (bits & WIFI_FAIL_BIT) {
         ESP_LOGI(TAG, "Failed to connect to SSID: %s", wifi_config.sta.ssid);
         ESP_LOGI(TAG, "Reached maximum retry limit for connection to the AP");
-        ESP_LOGI(TAG, "Restarting");    
+        ESP_LOGI(TAG, "Restarting");
         vTaskDelay(3000 / portTICK_PERIOD_MS);
         esp_restart();
     }
@@ -251,10 +251,11 @@ void wifi_init_sta(void) {
 
 void getting_started_task(void *pvParameter) {
     quarklink_return_t ql_ret;
-    quarklink_return_t ql_status = QUARKLINK_ERROR;
+    bool device_enrolled = false;
 
     esp_mqtt_client_handle_t mqtt_client = NULL;
     char message[MAX_MESSAGE_LENGTH] = "";
+    char endpoint[QUARKLINK_MAX_ENDPOINT_LENGTH] = "";
     uint32_t round = 0;
 
     while (1) {
@@ -263,53 +264,65 @@ void getting_started_task(void *pvParameter) {
         if (round % STATUS_CHECK_INTERVAL == 0) {
             /* get status */
             ESP_LOGI(TAG, "Get status");
-            ql_status = quarklink_status(&quarklink);
-            switch (ql_status) {
-                case QUARKLINK_STATUS_ENROLLED:
-                    ESP_LOGI(TAG, "Enrolled");
-                    if (strcmp(quarklink.iotHubEndpoint, "") == 0) {
-                        ESP_LOGI(TAG, "No enrolment info saved. Re-enrolling");
-                        ql_status = QUARKLINK_STATUS_NOT_ENROLLED;
-                    }
-                    break;
-                case QUARKLINK_STATUS_FWUPDATE_REQUIRED:
-                    ESP_LOGI(TAG, "Firmware Update required");
-                    break;
-                case QUARKLINK_STATUS_NOT_ENROLLED:
-                    ESP_LOGI(TAG, "Not enrolled");
-                    break;
-                case QUARKLINK_STATUS_CERTIFICATE_EXPIRED:
-                    ESP_LOGI(TAG, "Certificate expired");
-                    break;
-                case QUARKLINK_STATUS_REVOKED:
-                    ESP_LOGI(TAG, "Device revoked");
-                    break;
-                default:
-                    ESP_LOGE(TAG, "Error during status request");
-                    continue;
+            ql_ret = quarklink_status(&quarklink);
+            if (ql_ret != QUARKLINK_SUCCESS) {
+                ESP_LOGE(TAG, "Error during status request (%d)", ql_ret);
+                continue;
             }
 
-            if (ql_status == QUARKLINK_STATUS_NOT_ENROLLED ||
-                ql_status == QUARKLINK_STATUS_CERTIFICATE_EXPIRED ||
-                ql_status == QUARKLINK_STATUS_REVOKED) {
+            bool need_enrol = false;
+            bool need_fw_update = quarklink_is_device_fw_update_available(&quarklink);
+            device_enrolled = quarklink_is_device_enrolled(&quarklink);
+
+            if (device_enrolled) {
+                ESP_LOGI(TAG, "Enrolled");
+                if (strcmp(quarklink.iot_hub_endpoint, "") == 0) {
+                    ESP_LOGI(TAG, "No enrolment info saved. Re-enrolling");
+                    device_enrolled = false;
+                    need_enrol = true;
+                }
+            }
+            else if (quarklink_is_device_not_enrolled(&quarklink)) {
+                ESP_LOGI(TAG, "Not enrolled");
+                need_enrol = true;
+            }
+            else if (quarklink_is_device_certificate_expired(&quarklink)) {
+                ESP_LOGI(TAG, "Certificate expired");
+                need_enrol = true;
+            }
+            else if (quarklink_is_device_revoked(&quarklink)) {
+                ESP_LOGI(TAG, "Device revoked");
+                need_enrol = true;
+            }
+
+            if (need_fw_update) {
+                ESP_LOGI(TAG, "Firmware Update required");
+            }
+
+            if (need_enrol) {
                 /* Reset mqtt */
                 strcpy(mqtt_topic, "");
                 if (is_running) {
                     esp_mqtt_client_stop(mqtt_client);
                     is_running = false;
                 }
-                /* enroll */
-                ESP_LOGI(TAG, "Enrol to %s", quarklink.endpoint);
+                /* enrol */
+                if (quarklink_get_endpoint(&quarklink, endpoint, sizeof(endpoint)) == QUARKLINK_SUCCESS) {
+                    ESP_LOGI(TAG, "Enrol to %s", endpoint);
+                }
+                else {
+                    ESP_LOGI(TAG, "Enrol");
+                }
                 ql_ret = quarklink_enrol(&quarklink);
                 switch (ql_ret) {
                     case QUARKLINK_SUCCESS:
-                        ESP_LOGI(TAG, "Successfully enrolled");
-                        ql_ret = quarklink_persistEnrolmentContext(&quarklink);
+                        ESP_LOGI(TAG, "Successfully enrolled!");
+                        ql_ret = quarklink_persist_enrolment_context(&quarklink);
                         if (ql_ret != QUARKLINK_SUCCESS) {
-                            ESP_LOGW(TAG, "Failed to store the enrolment context");
+                            ESP_LOGW(TAG, "Failed to store the Enrolment context");
                         }
                         /* Update Status to avoid delaying MQTT Client init */
-                        ql_status = QUARKLINK_STATUS_ENROLLED;
+                        device_enrolled = true;
                         break;
                     case QUARKLINK_DEVICE_DOES_NOT_EXIST:
                         ESP_LOGW(TAG, "Device does not exist");
@@ -317,39 +330,38 @@ void getting_started_task(void *pvParameter) {
                     case QUARKLINK_DEVICE_REVOKED:
                         ESP_LOGW(TAG, "Device revoked");
                         break;
-                    case QUARKLINK_CACERTS_ERROR:
                     default:
-                        ESP_LOGE(TAG, "Error during enrol");
-                        continue;
+                        ESP_LOGE(TAG, "Error during enrol (%d)", ql_ret);
+                        break;
                 }
             }
 
-            if (ql_status == QUARKLINK_STATUS_FWUPDATE_REQUIRED) {
+            if (need_fw_update) {
                 /* firmware update */
                 ESP_LOGI(TAG, "Get firmware update");
-                ql_ret = quarklink_firmwareUpdate(&quarklink, NULL);
+                ql_ret = quarklink_firmware_update(&quarklink, NULL);
                 switch (ql_ret) {
-                    case QUARKLINK_FWUPDATE_UPDATED:
+                    case QUARKLINK_FW_UPDATE_UPDATED:
                         ESP_LOGI(TAG, "Firmware updated. Rebooting...");
                         esp_restart();
                         break;
-                    case QUARKLINK_FWUPDATE_NO_UPDATE:
+                    case QUARKLINK_FW_UPDATE_NO_UPDATE:
                         ESP_LOGI(TAG, "No firmware update");
                         break;
-                    case QUARKLINK_FWUPDATE_WRONG_SIGNATURE:
+                    case QUARKLINK_FW_UPDATE_INVALID_SIGNATURE:
                         ESP_LOGI(TAG, "Wrong firmware signature");
                         break;
-                    case QUARKLINK_FWUPDATE_MISSING_SIGNATURE:
+                    case QUARKLINK_FW_UPDATE_MISSING_SIGNATURE:
                         ESP_LOGI(TAG, "Missing required firmware signature");
                         break;
-                    case QUARKLINK_FWUPDATE_ERROR:
+                    case QUARKLINK_FW_UPDATE_ERROR:
                     default:
-                        ESP_LOGE(TAG, "Error while updating firmware");
-                        continue;
+                        ESP_LOGE(TAG, "Error while updating firmware (%d)", ql_ret);
+                        break;
                 }
             }
 
-            if (ql_status == QUARKLINK_STATUS_ENROLLED) {
+            if (device_enrolled) {
                 /* Start the MQTT task */
                 if (mqtt_init(&quarklink, &mqtt_client) != 0) {
                     ESP_LOGE(TAG, "Failed to initialise the MQTT Client");
@@ -359,9 +371,9 @@ void getting_started_task(void *pvParameter) {
         }
 
         // If it's time to publish
-        if ((round % MQTT_PUBLISH_INTERVAL == 0) && (ql_status == QUARKLINK_STATUS_ENROLLED)) {
+        if ((round % MQTT_PUBLISH_INTERVAL == 0) && device_enrolled) {
             if (strcmp(mqtt_topic, "") == 0) {
-                sprintf(mqtt_topic, "topic/%s", quarklink.deviceID);
+                sprintf(mqtt_topic, "topic/%s", quarklink.device_id);
             }
             sprintf(message, "{\"count\":%d}", count);
             int msg_id = esp_mqtt_client_publish(mqtt_client, mqtt_topic, message, 0, 0, 0);
@@ -384,9 +396,14 @@ void app_main(void) {
 
     /* quarklink init */
     ESP_LOGI(TAG, "Loading stored QuarkLink context");
-    // Need to initialise a local quarklink_context_t in order to retrieve the stored one. Doesn't matter what values it is given.
-    quarklink_return_t ql_ret = quarklink_init(&quarklink, "placeholder.endpoint", "");
-    ql_ret = quarklink_loadStoredContext(&quarklink);
+    // Need to initialise context + internal state in order to retrieve the stored one.
+    // Placeholder values are overwritten by quarklink_load_stored_context().
+    quarklink_return_t ql_ret = quarklink_init(&quarklink, &quarklink_state, "placeholder.endpoint", "");
+    if (ql_ret != QUARKLINK_SUCCESS) {
+        ESP_LOGE(TAG, "Failed to initialise QuarkLink (%d)", ql_ret);
+        esp_restart();
+    }
+    ql_ret = quarklink_load_stored_context(&quarklink);
     if (ql_ret == QUARKLINK_CONTEXT_NO_ENROLMENT_INFO_STORED) {
         // Should get here the first time after provisioning as the device hasn't enrolled yet
         ESP_LOGI(TAG, "No QuarkLink enrolment info stored");
@@ -398,11 +415,11 @@ void app_main(void) {
         esp_restart();
     }
 
-    ESP_LOGI(TAG, "Successfully loaded QuarkLink details for: %.*s%s",
-       (int)(strchr(quarklink.endpoint, '.') - quarklink.endpoint),     // instance basename
-       quarklink.endpoint,
-       strchr(strchr(quarklink.endpoint, '.') + 1, '.'));               // ".quarklink.io"
-    ESP_LOGI(TAG, "Device ID: %s", quarklink.deviceID);
+    char endpoint[QUARKLINK_MAX_ENDPOINT_LENGTH] = "";
+    if (quarklink_get_endpoint(&quarklink, endpoint, sizeof(endpoint)) == QUARKLINK_SUCCESS) {
+        ESP_LOGI(TAG, "Successfully loaded QuarkLink details for: %s", endpoint);
+    }
+    ESP_LOGI(TAG, "Device ID: %s", quarklink.device_id);
 
     wifi_init_sta();
 

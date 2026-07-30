@@ -30,7 +30,7 @@ except ImportError:
     )
     exit(1)
 
-VERSION = '0.13.0'
+VERSION = '1.1.0'
 
 long_description = """
 ======================
@@ -81,4 +81,5 @@ setup(
     include_package_data = True,
     packages=find_packages(),
     scripts=['secure_cert_mfg.py'],
+    license_files = [],
 )

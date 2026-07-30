@@ -18,10 +18,11 @@ import helper_scripts as hs
 import binascii
 import os
 import sys
+import zlib
 import sample_bins
 import sample_certs
 
-supported_targets = {'esp32', 'esp32s2', 'esp32s3', 'esp32c3', 'esp32c5', 'esp32c6'}
+supported_targets = {'esp32', 'esp32s3', 'esp32c2', 'esp32c3', 'esp32c6', 'esp32p4', 'esp32h2'}
 try:
     import esptool
 except ImportError:  # cheat and use IDF's copy of esptool if available
@@ -41,7 +42,7 @@ SAMPLE_SIGNERKEY_PATH = os.path.join(sample_certs.__path__[0],
 
 def get_binary_stub_path(target_chip):
     stub_path = os.path.join(sample_bins.__path__[0],
-                             f'secure_cert_mfg_{target_chip}.bin')
+                             f'{target_chip}/secure_cert_mfg_{target_chip}.bin')
     return stub_path
 
 
@@ -130,9 +131,13 @@ def main():
     retval = init_mfg.exec_cmd(args.port, 'init {0} {1}'.format(args.i2c_sda_pin, args.i2c_scl_pin))
     hs.serial.esp_cmd_check_ok(retval, 'init {0} {1}'.format(args.i2c_sda_pin, args.i2c_scl_pin))
 
+    device_type = retval[1]['Return']
     if 'TrustCustom' in retval[1]['Return']:
         print('ATECC608 chip is of type TrustCustom')
-        provision_trustcustom_device(args, init_mfg)
+        provision_trustcustom_device(args, init_mfg, device_type)
+    elif 'TrustManager' in retval[1]['Return']:
+        print('ATECC608 chip is of type TrustManager')
+        provision_trustcustom_device(args, init_mfg, device_type)
     elif 'Trust&Go' in retval[1]['Return']:
         print('ATECC608 chip is of type Trust&Go')
         hs.manifest.generate_manifest_file(args, init_mfg)
@@ -144,7 +149,7 @@ def main():
         exit(0)
 
 
-def provision_trustcustom_device(args, init_mfg):
+def provision_trustcustom_device(args, init_mfg, device_type):
 
     retval = init_mfg.exec_cmd(args.port, 'print-chip-info')
     hs.serial.esp_cmd_check_ok(retval, 'print-chip-info')
@@ -205,12 +210,17 @@ def provision_trustcustom_device(args, init_mfg):
     retval = init_mfg.exec_cmd(args.port, 'provide-cert-def 0', cert_def_str)
     hs.serial.esp_cmd_check_ok(retval, 'program-device-cert-def')
 
-    retval = init_mfg.exec_cmd(args.port, f'program-dev-cert {slot_lock}', device_cert)
-    hs.serial.esp_cmd_check_ok(retval, f'program-dev-cert {slot_lock} ')
+    crc32_value = zlib.crc32(device_cert) & 0xFFFFFFFF  # Ensure 32-bit unsigned value
+    retval = init_mfg.exec_cmd(args.port, f'program-dev-cert {slot_lock} {crc32_value}', device_cert)
+    hs.serial.esp_cmd_check_ok(retval, f'program-dev-cert {slot_lock} {crc32_value}')
     print(retval[1]['Return'])
 
     signer_cert_data = esp_handle_file(args.signer_cert, 'read')
     cert_der = esp_handle_file(args.signer_cert, 'pem_read')
+
+    if 'TrustManager' in device_type:
+        return True
+
     print('Signer cert is:')
     print(signer_cert_data)
 
@@ -220,8 +230,9 @@ def provision_trustcustom_device(args, init_mfg):
     retval = init_mfg.exec_cmd(args.port, 'provide-cert-def 1', cert_def_str)
     hs.serial.esp_cmd_check_ok(retval, 'program-signer-cert-def')
 
-    retval = init_mfg.exec_cmd(args.port, f'program-signer-cert {slot_lock}', signer_cert_data)
-    hs.serial.esp_cmd_check_ok(retval, f'program-signer-cert {slot_lock} ')
+    crc32_value = zlib.crc32(signer_cert_data.encode()) & 0xFFFFFFFF  # Ensure 32-bit unsigned value
+    retval = init_mfg.exec_cmd(args.port, f'program-signer-cert {slot_lock} {crc32_value}', signer_cert_data)
+    hs.serial.esp_cmd_check_ok(retval, f'program-signer-cert {slot_lock} {crc32_value}')
 
 
 def esp_handle_file(file_name, operation, data=None):

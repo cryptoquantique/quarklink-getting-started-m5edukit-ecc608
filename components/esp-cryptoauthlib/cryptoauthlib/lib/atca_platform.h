@@ -30,8 +30,12 @@
 #include <stddef.h>
 #include <string.h>
 
+#ifndef LIBRARY_BUILD_EN
+#include "atca_config.h"
+#endif
+
 #if defined(ATCA_TESTS_ENABLED) || !defined(ATCA_PLATFORM_MALLOC)
-void*   hal_malloc(size_t size);
+void*   hal_malloc(size_t size); 
 void    hal_free(void* ptr);
 #else
 #define hal_malloc      ATCA_PLATFORM_MALLOC
@@ -52,7 +56,7 @@ void    hal_free(void* ptr);
 #define lib_strcasestr  ATCA_PLATFORM_STRCASESTR
 #else
 #ifndef strcasestr
-char *lib_strcasestr(const char *haystack, const char *needle);
+const char *lib_strcasestr(const char *haystack, const char *needle);
 #else
 #define lib_strcasestr  strcasestr
 #endif

@@ -24,13 +24,13 @@ There are a few requirements needed in order to get started with this project:
     Instructions on how to setup the esp-idf environment can be found [here](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.html).
 - **quarklink-client libraries**
     The quarklink-client library comes in the form of compiled binaries and can be found in the [quarklink-binaries repository](https://github.com/cryptoquantique/quarklink-binaries/tree/main/quarklink-client).  
-    The files needed for this project are labelled with *m5edukit-ecc608* and need to copied inside the `lib` folder in this project.
+    The files needed for this project are labelled with *m5edukit-ecc608* and need to be copied inside the `lib` folder in this project. The matching public headers under `include/quarklink/` from the same package are also required.
 
 ## Setup
 
 ### Provision the ATECC-608 Secure Element
 When configuring a new device, there is need to provision the Secure Element in order to use it.  
-The esp-cryptoauthlib component included in this project, is a port of Microchip's [cryptoauthlib](https://github.com/MicrochipTech/cryptoauthlib) for ESP-IDF and includes all the utilities needed to configure, provision and use the Secure Element module. The component can also be found [here](https://github.com/espressif/esp-cryptoauthlib).  
+The esp-cryptoauthlib component included in this project is a port of Microchip's [cryptoauthlib](https://github.com/MicrochipTech/cryptoauthlib) for ESP-IDF (pinned to Espressif [3.7.9~1](https://github.com/espressif/esp-cryptoauthlib/commit/d9792119ebaec0c54839e6605acd3f11dd937205)) and includes the utilities needed to configure, provision and use the Secure Element. Upstream is [here](https://github.com/espressif/esp-cryptoauthlib).  
 Instructions on how to provision the ATECC-608 are included in the `esp_cryptoauth_utility` [README.md](./components/esp-cryptoauthlib/esp_cryptoauth_utility/README.md).  
 
 ### Project configuration
@@ -56,14 +56,16 @@ Updating a device from **vefuse** to **release** or vice-versa, will break the d
 To change the quarklink-client compiled library to use, simply modify the [CMakeLists.txt](./main/CMakeLists.txt) in the main folder and update with the path and name of the file needed.
 E.g.
 ```c
-add_prebuilt_library(quarklink_client "../lib/libquarklink-client-esp32-m5edukit-ecc608-v1.4.6.a"
+add_prebuilt_library(quarklink_client "../lib/libquarklink-client-m5edukit-ecc608-v2.0.2-info.a"
                     PRIV_REQUIRES nvs_flash esp_http_client esp_https_ota app_update mbedtls esp-cryptoauthlib)
 ```
 Becomes
 ```c
-add_prebuilt_library(quarklink_client "../lib/libquarklink-client-esp32-m5edukit-ecc608-v1.4.6-debug.a"
+add_prebuilt_library(quarklink_client "../lib/libquarklink-client-m5edukit-mbedtls-v2.0.2-info.a"
                     PRIV_REQUIRES nvs_flash esp_http_client esp_https_ota app_update mbedtls esp-cryptoauthlib)
 ```
+
+When switching key provider libraries, also update the `QL_CFG_KEYPROV` compile definition in the same `CMakeLists.txt` (e.g. `QL_KEYPROV_ESPIDF_ATECC608` or `QL_KEYPROV_MBEDTLS`).
 
 
 ## Build
